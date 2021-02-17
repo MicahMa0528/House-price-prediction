@@ -1,0 +1,645 @@
+# House-price-prediction
+Kaggle competition with house price predicting
+
+
+House Price Predictive Modelling
+Options and The Decision
+To predict quantities by using regression modules and to use visual tools to identify data characteristics to optimize the holdout cross-fold validation by using advanced plotting, interaction, spurious correlations, variable selection and regularizations.
+3 Options:
+There are 3 competitions are suitable for predictive modeling using regression analysis, which are predict future sales, Santander customer transaction prediction and house price.
+The predict future sales provided with daily historical sales data. The task is to forecast the total amount of products sold in every shop for the test set. However, this case is time sensitive, it contains the time series prediction which has not been covered yet.
+Santander customer transaction needs to identify which customers will make a specific transaction in the future, irrespective of the amount of money transacted. This case is obviously a quantity prediction, but it contains some complex model like EDA, also will be necessary to do the resampling. It doesn’t fully align with our day 1 class.
+The decision
+There are several reasons why I choose House Price case. Firstly, it contains a lot of different variables, which will help me to understand how the data type is identified and how to impute different types of data. Moreover, it allows us to use different charts and graphs to support or guide us to select the correct variables and regularizations. Finally, as a potential house buyer, this case can help me understand what factors may affect house price most which may helps me when I want to buy my own house in the future as my personal interest.
+
+Model Building and Data Imputation
+Getting Data:
+Before building the model, I need to know the data distribution and missing values.
+First, I need to load the given data into R and merge them into one dataset.
+> #read data
+> train <- read.csv(file = "C:/Users/Micah/OneDrive/Desktop/MMA/867/ass1/train.csv")
+> test <- read.csv(file = "C:/Users/Micah/OneDrive/Desktop/MMA/867/ass1/test.csv")
+> #merge 2 data
+> test$SalePrice <- NA
+> tbind <- rbind(train,test)
+In this step, we merge test and train into tbind and set the sale price of test as NA.
+Since there are tons of variables, I will first check and understand each variable.
+> str(tbind)
+'data.frame':	2919 obs. of  81 variables:
+The result indicates 81 variables and 2919 observations, which contains 2 major types of data: numeric and factor. Now, I want to know the number of each type.
+> tclass <- sapply(tbind,class)
+> table(tclass)
+tclass
+ factor integer 
+     43      38 
+As shown in the table content, there are 43 factor variables and 38 numeric variables.
+Next step is imputing all missing values by listing the total counts of missing value for each variable in a descending order.
+> #find all missing values
+> tmiss <- sapply(tbind, function(x) sum(is.na(x)))
+> #list the counts of all missing value in descresing order
+> tmissdec <- sort(tmiss, decreasing = TRUE)
+> tmissdec[tmissdec>0]
+      PoolQC  MiscFeature        Alley        Fence    SalePrice 
+        2909         2814         2721         2348         1459 
+ FireplaceQu  LotFrontage  GarageYrBlt GarageFinish   GarageQual 
+        1420          486          159          159          159 
+  GarageCond   GarageType     BsmtCond BsmtExposure     BsmtQual 
+         159          157           82           82           81 
+BsmtFinType2 BsmtFinType1   MasVnrType   MasVnrArea     MSZoning 
+          80           79           24           23            4 
+   Utilities BsmtFullBath BsmtHalfBath   Functional  Exterior1st 
+           2            2            2            2            1 
+ Exterior2nd   BsmtFinSF1   BsmtFinSF2    BsmtUnfSF  TotalBsmtSF 
+           1            1            1            1            1 
+  Electrical  KitchenQual   GarageCars   GarageArea     SaleType 
+           1            1            1            1            1 
+
+Feature Engineering:
+From the above chart, it easy to know that the dataset has a lot of missing values. Since the total number of the observation is 2919, the 50% of observations for each variable is 2919*0.5 = 1459.5. In this case, I will directly drop those variables have over 1400 missing values, which include PoolQC、MiscFeature、Alley、Fence and FireplaceQu.
+> Drop <- names(tbind) %in% c("PoolQC","MiscFeature","Alley","Fence","FireplaceQu")
+> tbind <- tbind[!Drop]
+Moreover, there are some variables can be categorized. For example: Variables GarageType、、GarageFinish、GarageQual and GarageCond have missing values because the house doesn’t have a garage. Same as BsmtExposure、BsmtFinType2、BsmtQual、BsmtCond、BsmtFinType1 is because the house doesn’t have a basement. All of above variables are factor, so we use “None” to replace it.
+> Garage <- c("GarageType","GarageQual","GarageCond","GarageFinish")
+> Bsmt <- c("BsmtExposure","BsmtFinType2","BsmtQual","BsmtCond","BsmtFinType1")
+> for (x in c(Garage, Bsmt) )
++ {
++   tbind[[x]] <- factor( tbind[[x]], levels= c(levels(tbind[[x]]),c('None')))
++   tbind[[x]][is.na(tbind[[x]])] <- "None"
++ }
+GarageYrBlt represents the year that the garage was built. In this case, most likely it supposed to be the same year that the house was built
+> tbind$GarageYrBlt[is.na(tbind$GarageYrBlt)] <- tbind$YearBuilt[is.na(tbind$GarageYrBlt)]
+LotFrontage represents the distance between house and street, in this case we can use either median or mean to replace it. I choose median here since this variable has a relatively high volume of missing value.
+> tbind$LotFrontage[is.na(tbind$LotFrontage)] <- median(tbind$LotFrontage, na.rm = T)
+MasVnrType and MasVnrArea represent type and area of wall decorations, which aren’t very relevant to the sale price. So I just replace it with “None” and 0.
+> tbind[["MasVnrType"]][is.na(tbind[["MasVnrType"]])] <- "None"
+> tbind[["MasVnrArea"]][is.na(tbind[["MasVnrArea"]])] <- 0
+The utility is irrelevant to sale price, so we just simply make it null.
+> tbind$Utilities <- NULL
+The missing variable of BsmtFullBath, BsmtHalfBath, BsmtFinSF1, BsmtFinSF2, BsmtUnfSF, TotalBsmtSF, GarageCars and  GarageArea is the absence of corresponding facilities. These variables are all numerical variables, so they can be supplemented as 0.
+> Param0 <- c("BsmtFullBath","BsmtHalfBath","BsmtFinSF1","BsmtFinSF2","BsmtUnfSF","TotalBsmtSF","GarageCars","GarageArea","BsmtFinSF2","BsmtFinSF1")
+> for (x in Param0 )    tbind[[x]][is.na(tbind[[x]])] <- 0
+The missing variable of MSZoning, Functional, Exterior1st, Exterior2nd, KitchenQual, Electrical and SaleType is factor value, meanwhile, they only have few were missing. I will use mode to replace it.
+> othermiss <- c("MSZoning","Functional","Exterior1st","Exterior2nd","KitchenQual","Electrical","SaleType")
+> for (x in othermiss )    tbind[[x]][is.na(tbind[[x]])] <- levels(tbind[[x]])[mode(table(tbind[[x]]))]
+After imputing all missing values, there are 75 variables without any missing value now. 
+Creating Train and Test:
+I split test and train based on if SalePrice is NA for my future modelling and create a new variable called House age by using the year house sold minus year house built.
+> tbind$HouseAge <- tbind$YrSold - tbind$YearBuilt
+> train1 <- tbind[!is.na(tbind$SalePrice), ]
+> test1 <- tbind[is.na(tbind$SalePrice), ]
+Regression Modelling:
+This is one of the most important steps in my predictive model. In regression modelling I need to pick the correct variables which affect the SalePrice most.
+By common senses, we know that location, neighbourhood, house age, house type, near the subway or school or renovation may be key factors that affect house price.
+So, I will come up with a base model first.
+> base <- SalePrice ~ LotArea + Neighborhood + BldgType + HouseStyle + YearRemodAdd + OverallQual + OverallCond + HouseAge
+> lm.base <- lm(base, train1)
+Since I have put the house age, I didn’t add the year house built.
+I will use ggplot to check the relationship between these variables and house price.
+First, I will take a look on the distribution of sale price 
+> ggplot(data=tbind[!is.na(tbind$SalePrice),], aes(x=SalePrice)) +
++   geom_histogram(fill="black", binwidth = 10000) +
++   scale_x_continuous(breaks= seq(0, 800000, by=100000), labels = comma)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+From the picture, we know that the sales price looks normal distributed, we can know, most of house were sold between 100k to 200k. Then I will calculate to see which numeric variable have a high correlation.
+> tnumeric <- which(sapply(train1, is.numeric)) #index vector numeric variables
+> tnumname <- names(tnumeric) #saving names vector for use later on
+> cat(length(tnumname))
+39
+There are 39 numeric variables in total.
+I created a degree chart based on Sale Price and other variables which has a correlation over 0.5.
+> allnum <- train1[, tnumeric]
+> cor_allnum <- cor(allnum, use="pairwise.complete.obs") #correlations of all numeric variables
+> #sort on decreasing correlations with SalePrice
+> cor_sorted <- as.matrix(sort(cor_allnum[,'SalePrice'], decreasing = TRUE))
+> #select only high corelations
+> CorHigh <- names(which(apply(cor_sorted, 1, function(x) abs(x)>0.5)))
+> cor_allnum <- cor_allnum[CorHigh, CorHigh]
+> corrplot.mixed(cor_allnum, tl.col="black", tl.pos = "lt")
+By visualizing the relation, I figured that OverallQual and GrLivArea have the highest cor. Meanwhile, there is also multicollinearity issue. For example GarageArea and GarageCars, X1stFlrSF and TotalBsmtSF, GarageYrBlt and YearBuilt.
+So, I will come up with a base model first.
+> base <- SalePrice ~ LotArea + Neighborhood + BldgType + HouseStyle + YearRemodAdd + OverallQual + OverallCond + HouseAge + GrLivArea + GarageCars + TotalBsmtSF + FullBath + TotRmsAbvGrd + HouseAge
+> lm.base <- lm(base, train1)
+I summarised the model, based on the hypothesis test, I dropped 2 insignificant variables: FullBath and TotRmsAbvGrd.
+Residuals:
+    Min      1Q  Median      3Q     Max 
+-392885  -13031    -654   11638  265192 
+
+Residual standard error: 32610 on 1414 degrees of freedom
+Multiple R-squared:  0.8367,	Adjusted R-squared:  0.8315 
+F-statistic:   161 on 45 and 1414 DF,  p-value: < 2.2e-16
+Here is the result of this linear regression. From the result, I found that the median is negative, dataset is somehow left-sided. The max value represent the difference between the prediction and realistic number, which is $265,192
+The smaller the p-value is the more the data is accurate, so I take insignificant variables off(no star and dot). The more R-square and adjusted R-square is close to 1, the higher power the predictions can be explained.
+The p-value is about to 0, which reject the null hypothesis. This model is doable.
+The base model is clearly not good enough. The score is over 0.2. So I need to adjust my base model.
+Initial Implementation:
+Next step, I plot out the regression model and received following chart.
+> lm.base <- lm(base, train1)
+> layout(matrix(1:4,2,2))
+> plot(lm.base)
+
+
+
+ 
+From Residuals vs Fitted, I can tell the data is randomly distributed around the average line 0, but there are some outliers.From Normal Q-Q, standard residual value is independent with average value 0, the plots should lie on corner line. The residuals vs leverage is using cook’s distance to determine what is outlier and how should I treat outliers.
+ 
+Normally, we use 4 times average points as the monitoring standard. After numerus times of tests, I found that, in fact, 8 times average value will return best results. Then I label all outliers and remove them from the dataset “train”
+> cooksd <- cooks.distance(lm.base)
+> 
+> 
+> plot(cooksd, pch=".", cex=1, main="Influential Obs by Cooks distance")  # plot cook's distance
+> abline(h = 8*mean(cooksd, na.rm=T), col="red")  # add cutoff line
+> text(x=1:length(cooksd)+1, y=cooksd, labels=ifelse(cooksd>20*mean(cooksd, na.rm=T),names(cooksd),""), col="red")  # add labels
+> 
+> 
+> influential <- as.numeric(names(cooksd)[(cooksd > 8*mean(cooksd, na.rm=T))])
+> train1 <- train1[ -influential, ]
+After removing the outliers, the distribution now looks  normally distributed and even better with log of the value.
+> layout(matrix(1:2,1,2))
+> hist(train$SalePrice)
+> hist(log(train$SalePrice))
+ 
+So here comes my new advanced model:
+> advanced <- log(SalePrice) ~ log(LotArea) + Neighborhood + BldgType + HouseStyle + YearRemodAdd + OverallQual + OverallCond + HouseAge + log(GrLivArea) + GarageCars + TotalBsmtSF + HouseAge
+> lm.adv <- lm(advanced, train1)
+> summary(lm.adv)
+In this new model, I got a higher adjusted R-square than my base model (It doesn’t mean it is a better model but after testing, it did return a better result). The max is smaller as well.
+Residuals:
+     Min       1Q   Median       3Q      Max 
+-0.77436 -0.05998  0.00713  0.06753  0.39197
+Residual standard error: 0.1206 on 1386 degrees of freedom
+Multiple R-squared:  0.9048,	Adjusted R-squared:  0.9019 
+F-statistic: 306.4 on 43 and 1386 DF,  p-value: < 2.2e-16
+Model Comparison:
+In this competition, I used total of 5 different models, Stepwise, Lasso, Random Forest, GBDT and XGBoost. Since best result is the combination of Lasso and XGBoost, I won’t discuss other methods in the report. However, all of the models have been included in R file and appendix.
+Lasso:
+Basically, lasso gives the best results of all 5 models. The elastic-net penalty is controlled by alpha, the best lambda of lasso (where we set the alpha = 1) will give me the opportunity to find out how many of variables are not used in this model.
+> formula <- as.formula( log(SalePrice)~ .-Id )
+> x <- model.matrix(formula, train1)
+> y <- log(train1$SalePrice)
+> set.seed(999)
+> lm.lasso <- cv.glmnet(x, y, alpha=1)
+> coef(lm.lasso, s = "lambda.min")
+
+> test1$SalePrice <- 1
+> test_x <- model.matrix(formula, test1)
+> lm.pred <- predict(lm.lasso, newx = test_x, s = "lambda.min")
+> reslasso <- data.frame(Id = test1$Id, SalePrice = exp(lm.pred))
+> write.csv(reslasso, file = "C:/Users/Micah/OneDrive/Desktop/MMA/867/ass1/res_lasso22.csv", row.names = FALSE)
+
+
+XGBoost:
+Initially, I just worked with the xgboost directly. It gave me a cross validation function. However, it only determines the optimal number of rounds, it doesn’t support a full grid search of hyperparameters. In this case, I am setting up a grid that tunes both these parameters and also the eta
+> tfactor <- which(sapply(tbind, is.factor))
+> tfname <- names(tfactor)
+> tfactor <- tbind[,names(tbind) %in% tfname]
+> tdummies <- as.data.frame(model.matrix(~.-1, tfactor))
+> tnum <- which(sapply(tbind, is.numeric))
+> tnumname <- tbind[, !(names(tbind) %in% tfname)]
+> combined <- cbind(tnumname,tdummies)
+> train2 <- combined[!is.na(tbind$SalePrice),]
+> test2 <- combined[is.na(tbind$SalePrice),]
+> xgb_grid = expand.grid(
++   nrounds = 1000,
++   eta = c(0.1, 0.05, 0.01),
++   max_depth = c(2, 3, 4, 5, 6),
++   gamma = 0,
++   colsample_bytree=1,
++   min_child_weight=c(1, 2, 3, 4 ,5),
++   subsample=1
++ )
+> set.seed(999)
+> my_control <-trainControl(method="cv", number=5)
+> xgb_caret <- train(x=train2, y=tbind$SalePrice[!is.na(tbind$SalePrice)], method='xgbTree', trControl = my_control, tuneGrid=xgb_grid)
+
+label_train <- tbind$SalePrice[!is.na(tbind$SalePrice)]
+# put our testing & training data into two seperates Dmatrixs objects
+dtest <- xgb.DMatrix(data = as.matrix(test2))
+default_param<-list(
+xgbcv <- xgb.cv( params = default_param, data = dtrain, nrounds = 500, nfold = 5, showsd = T, stratified = T, print_every_n = 40, early_stopping_rounds = 10, maximize = F)
+#train the model using the best iteration found by cross validation
+XGBpred <- predict(xgb_mod, dtest)
+predictions_XGB <- exp(XGBpred) #need to reverse the log to the real values
+#view variable importance plot
+mat <- xgb.importance (feature_names = colnames(train1),model = xgb_mod)
+xgb.ggplot.importance(importance_matrix = mat[1:20], rel_to_first = TRUE)
+
+#merge 2 models
+sub_avg <- data.frame(Id = test_labels, SalePrice = (predictions_XGB+reslasso$SalePrice)/2)
+write.csv(sub_avg, file = 'C:/Users/Micah/OneDrive/Desktop/MMA/867/ass1/res_combine5.csv', row.names = F)
+I got relatively high rank for both xgboost and lasso, but surprisingly I got even higher when I simply merge these two models with average.
+
+Above all, the sub_avg is the final prediction I choose to upload.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Appendix:
+1.	R codes:
+install.packages("corrplot")
+
+library(corrplot)
+
+library(dummies)
+
+library(mice)
+
+library(readxl)
+
+library(car)
+
+library(estimatr)
+
+library(stringr)
+
+library(ggplot2)
+
+library(lubridate)
+
+library(dplyr)
+
+library(tidyverse)
+
+library(sqldf)
+
+library(gbm)
+
+library(randomForest)
+
+library(caret) 
+
+library(e1071) 
+
+library(xgboost)
+
+#read data
+train <- read.csv(file = "C:/Users/Micah/OneDrive/Desktop/MMA/867/ass1/train.csv")
+test <- read.csv(file = "C:/Users/Micah/OneDrive/Desktop/MMA/867/ass1/test.csv")
+
+#merge 2 data
+test$SalePrice <- NA 
+tbind <- rbind(train,test)
+
+#check the data structure 
+str(tbind)
+
+#based on the result, the dataset has 2 major types of data - int and Factor
+
+#factor distribution
+tclass <- sapply(tbind,class)
+table(tclass)
+
+#Feature engineering
+
+#find all missing values
+tmiss <- sapply(tbind, function(x) sum(is.na(x)))
+
+#list the counts of all missing value in descresing order
+tmissdec <- sort(tmiss, decreasing = TRUE)
+tmissdec[tmissdec>0]
+
+Drop <- names(tbind) %in% c("PoolQC","MiscFeature","Alley","Fence","FireplaceQu")
+tbind <- tbind[!Drop]
+
+Garage <- c("GarageType","GarageQual","GarageCond","GarageFinish")
+Bsmt <- c("BsmtExposure","BsmtFinType2","BsmtQual","BsmtCond","BsmtFinType1")
+for (x in c(Garage, Bsmt) )
+{
+  tbind[[x]] <- factor( tbind[[x]], levels= c(levels(tbind[[x]]),c('None')))
+  tbind[[x]][is.na(tbind[[x]])] <- "None"
+}
+
+
+
+tbind$GarageYrBlt[is.na(tbind$GarageYrBlt)] <- tbind$YearBuilt[is.na(tbind$GarageYrBlt)]
+tbind$LotFrontage[is.na(tbind$LotFrontage)] <- median(tbind$LotFrontage, na.rm = T)
+tbind[["MasVnrType"]][is.na(tbind[["MasVnrType"]])] <- "None"
+tbind[["MasVnrArea"]][is.na(tbind[["MasVnrArea"]])] <- 0
+tbind$Utilities <- NULL
+Param0 <- c("BsmtFullBath","BsmtHalfBath","BsmtFinSF1","BsmtFinSF2","BsmtUnfSF","TotalBsmtSF","GarageCars","GarageArea","BsmtFinSF2","BsmtFinSF1")
+for (x in Param0 )    tbind[[x]][is.na(tbind[[x]])] <- 0
+
+othermiss <- c("MSZoning","Functional","Exterior1st","Exterior2nd","KitchenQual","Electrical","SaleType")
+for (x in othermiss )    tbind[[x]][is.na(tbind[[x]])] <- levels(tbind[[x]])[which.max(table(tbind[[x]]))]
+
+tbind$HouseAge <- tbind$YrSold - tbind$YearBuilt
+train1 <- tbind[!is.na(tbind$SalePrice), ]
+test1 <- tbind[is.na(tbind$SalePrice), ]
+
+#library(ggplot2)
+
+
+base <- SalePrice ~ LotArea + Neighborhood + BldgType + HouseStyle + YearBuilt + YearRemodAdd + OverallQual + OverallCond
+
+
+lm.base <- lm(base, train1)
+
+ggplot(data=tbind[!is.na(tbind$SalePrice),], aes(x=SalePrice)) +
+  geom_histogram(fill="black", binwidth = 10000) +
+  scale_x_continuous(breaks= seq(0, 800000, by=100000), labels = comma)
+
+tnumeric <- which(sapply(train1, is.numeric)) #index vector numeric variables
+tnumname <- names(tnumeric) #saving names vector for use later on
+cat(length(tnumname))
+allnum <- train1[, tnumeric]
+cor_allnum <- cor(allnum, use="pairwise.complete.obs") #correlations of all numeric variables
+
+#sort on decreasing correlations with SalePrice
+cor_sorted <- as.matrix(sort(cor_allnum[,'SalePrice'], decreasing = TRUE))
+#select only high corelations
+CorHigh <- names(which(apply(cor_sorted, 1, function(x) abs(x)>0.5)))
+cor_allnum <- cor_allnum[CorHigh, CorHigh]
+
+tcor <- corrplot.mixed(cor_allnum, tl.col="black", tl.pos = "lt")
+dev.new()
+
+
+base <- SalePrice ~ LotArea + Neighborhood + BldgType + HouseStyle + YearRemodAdd + OverallQual + OverallCond + HouseAge + GrLivArea + GarageCars + TotalBsmtSF + HouseAge
+lm.base <- lm(base, train1)
+summary(lm.base)
+
+
+lm.pred <- predict(lm.base, test1)
+
+
+res <- data.frame(Id = test1$Id, SalePrice = lm.pred)
+head(res)
+write.csv(res, file = "C:/Users/Micah/OneDrive/Desktop/MMA/867/res_base.csv", row.names = FALSE)
+
+
+layout(matrix(1:4,2,2))
+plot(lm.base)
+
+
+cooksd <- cooks.distance(lm.base)
+
+
+plot(cooksd, pch=".", cex=1, main="Influential Obs by Cooks distance")  # plot cook's distance
+abline(h = 8*mean(cooksd, na.rm=T), col="red")  # add cutoff line
+text(x=1:length(cooksd)+1, y=cooksd, labels=ifelse(cooksd>20*mean(cooksd, na.rm=T),names(cooksd),""), col="red")  # add labels
+
+
+influential <- as.numeric(names(cooksd)[(cooksd > 8*mean(cooksd, na.rm=T))])
+train1 <- train1[ -influential, ]
+
+
+
+layout(matrix(1:2,1,2))
+hist(train1$SalePrice)
+hist(log(train1$SalePrice))
+
+
+
+
+advanced <- log(SalePrice) ~ log(LotArea) + Neighborhood + BldgType + HouseStyle + YearRemodAdd + OverallQual + OverallCond + HouseAge + log(GrLivArea) + GarageCars + TotalBsmtSF + HouseAge
+lm.adv <- lm(advanced, train1)
+summary(lm.adv)
+
+
+
+##########################################################Stepwise
+null=lm(log(SalePrice)~1, data=train1)
+full=lm(log(SalePrice)~ .-Id , data=train1) 
+
+set.seed(9999)
+lm.for <- step(null, scope=list(lower=null, upper=full), direction="forward")
+
+
+log(SalePrice) ~ OverallQual + GrLivArea + Neighborhood + BsmtFinSF1 + 
+  OverallCond + HouseAge + TotalBsmtSF + GarageCars + MSZoning + 
+  SaleCondition + BldgType + Functional + LotArea + Condition1 + 
+  CentralAir + KitchenQual + BsmtExposure + Heating + Fireplaces + 
+  BsmtFullBath + Exterior1st + YearRemodAdd + ScreenPorch + 
+  GarageQual + WoodDeckSF + LotConfig + LotFrontage + Foundation + 
+  SaleType + ExterCond + HeatingQC + EnclosedPorch + OpenPorchSF + 
+  LandSlope + MasVnrType + GarageArea + RoofMatl + GarageCond + 
+  HalfBath + LowQualFinSF + Street + KitchenAbvGr + FullBath
+
+#install.packages("glmnet")
+library(glmnet)
+
+###########################################################Lasso
+formula <- as.formula( log(SalePrice)~ .-Id )
+
+x <- model.matrix(formula, train1)
+y <- log(train1$SalePrice)
+
+set.seed(999)
+lm.lasso <- cv.glmnet(x, y, alpha=1)
+
+plot(lm.lasso)
+
+
+coef(lm.lasso, s = "lambda.min")
+
+
+test1$SalePrice <- 1
+test_x <- model.matrix(formula, test1)
+
+
+lm.pred <- predict(lm.lasso, newx = test_x, s = "lambda.min")
+reslasso <- data.frame(Id = test1$Id, SalePrice = exp(lm.pred))
+names(reslasso)[names(reslasso) == "X1"] <- "SalePrice"
+head(reslasso)
+write.csv(reslasso, file = "C:/Users/Micah/OneDrive/Desktop/MMA/867/ass1/res_lasso22.csv", row.names = FALSE)
+
+
+############################RandomForest
+
+set.seed(9999)
+ctrl <- trainControl(method = "cv", number = 10, repeats = 20, verboseIter = TRUE)
+
+
+lm.rf <- train(log(SalePrice)~ .-Id, data = train,  method = "rf",  trControl = ctrl,  tuneLength = 3)
+
+
+write_res(lm.rf, test, 'rf')
+
+
+lm.pred <- predict(lm.rf, test)
+res <- data.frame(Id = test$Id, SalePrice = exp(lm.pred))
+names(res)[names(res) == "X1"] <- "SalePrice"
+write.csv(res, file = "C:/Users/Micah/OneDrive/Desktop/MMA/867/ass1/res_rforest2.csv", row.names = FALSE)
+
+#####################################gbm
+
+lm.gbm <- train(log(SalePrice)~ .-Id, data = train,  method = "gbm",  trControl = ctrl)
+
+
+lm.pred <- predict(lm.gbm, test)
+resgbm <- data.frame(Id = test$Id, SalePrice = exp(lm.pred))
+names(resgbm)[names(res) == "X1"] <- "SalePrice"
+write.csv(res, file = "C:/Users/Micah/OneDrive/Desktop/MMA/867/ass1/res_gbm3.csv", row.names = FALSE)
+
+rescombine$SalePrice <- (reslasso$X1 + resgbm$SalePrice)/2
+rescombine <- data.frame(Id = test$Id, SalePrice = exp(rescombine$SalePrice))
+write.csv(res, file = "C:/Users/Micah/OneDrive/Desktop/MMA/867/ass1/res_combine.csv", row.names = FALSE)
+
+
+str(train)
+#################################xgboost
+
+tfactor <- which(sapply(tbind, is.factor))
+tfname <- names(tfactor)
+tfactor <- tbind[,names(tbind) %in% tfname]
+tdummies <- as.data.frame(model.matrix(~.-1, tfactor))
+tnum <- which(sapply(tbind, is.numeric))
+tnumname <- tbind[, !(names(tbind) %in% tfname)]
+combined <- cbind(tnumname,tdummies)
+train2 <- combined[!is.na(tbind$SalePrice),]
+test2 <- combined[is.na(tbind$SalePrice),]
+
+
+xgb_grid = expand.grid(
+  nrounds = 1000,
+  eta = c(0.1, 0.05, 0.01),
+  max_depth = c(2, 3, 4, 5, 6),
+  gamma = 0,
+  colsample_bytree=1,
+  min_child_weight=c(1, 2, 3, 4 ,5),
+  subsample=1
+)
+
+
+set.seed(999)
+my_control <-trainControl(method="cv", number=5)
+xgb_caret <- train(x=train2, y=tbind$SalePrice[!is.na(tbind$SalePrice)], method='xgbTree', trControl = my_control, tuneGrid=xgb_grid) 
+
+
+label_train <- tbind$SalePrice[!is.na(tbind$SalePrice)]
+
+# put our testing & training data into two seperates Dmatrixs objects
+dtrain <- xgb.DMatrix(data = as.matrix(train2), label= label_train)
+dtest <- xgb.DMatrix(data = as.matrix(test2))
+
+
+default_param<-list(
+  objective = "reg:linear",
+  booster = "gbtree",
+  eta=0.05, #default = 0.3
+  gamma=0,
+  max_depth=3, #default=6
+  min_child_weight=4, #default=1
+  subsample=1,
+  colsample_bytree=1
+)
+
+xgbcv <- xgb.cv( params = default_param, data = dtrain, nrounds = 500, nfold = 5, showsd = T, stratified = T, print_every_n = 40, early_stopping_rounds = 10, maximize = F)
+
+#train the model using the best iteration found by cross validation
+xgb_mod <- xgb.train(data = dtrain, params=default_param, nrounds = 454)
+
+XGBpred <- predict(xgb_mod, dtest)
+predictions_XGB <- exp(XGBpred) #need to reverse the log to the real values
+
+
+#view variable importance plot
+library(Ckmeans.1d.dp) #required for ggplot clustering
+mat <- xgb.importance (feature_names = colnames(train1),model = xgb_mod)
+xgb.ggplot.importance(importance_matrix = mat[1:20], rel_to_first = TRUE)
+
+#merge model
+sub_avg <- data.frame(Id = test_labels, SalePrice = (predictions_XGB+reslasso$SalePrice)/2)
+
+
+2.	Screenshots
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
